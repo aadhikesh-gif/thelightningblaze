@@ -39,6 +39,7 @@
  *
  * @license MIT
  */
+
 'use strict';
 
 // NOTE: This file intentionally doesn't use too many modern JavaScript
@@ -91,15 +92,41 @@ if (Config.watchconfig) {
 	});
 }
 
+const http = require("http");
+setInterval(function() {
+    http.get("http://impulse07.glitch.com");
+}, 180000); // every 3 minutes (180000)
+
 /*********************************************************
  * Set up most of our globals
  *********************************************************/
+// Custom Globals
 
-global.WL = {};
+global.Server = {};
 
-global.Db = require('nef')(require('nef-fs')('config/db'));
+global.Server = require('./Server.js').Server;
 
-global.Monitor = require('./monitor');
+global.serverName = Config.serverName;
+
+//replace URL with your MongoDB Url.
+//https://mongodb.com provide free MobgoDB Hosting ( 512MB ).
+//global.Db = require('nef')(require('nef-mongo')('URL'));
+
+// Store data locally ( Disable local storage, If you want to use cloud storage. )
+const nef = require('nef');
+const nefFs = require('nef-mongo');
+global.Db = nef(nefFs('mongodb://AllianceSky-PS:7066091863@princesky-db-shard-00-00-gmww8.mongodb.net:27017,princesky-db-shard-00-01-gmww8.mongodb.net:27017,princesky-db-shard-00-02-gmww8.mongodb.net:27017/test?ssl=true&replicaSet=PrinceSky-Db-shard-0&authSource=admin&retryWrites=true'));
+
+// Sqlite3 Databse for REGIONS.
+global.sqlite3 = require('sqlite3');
+
+// Additional Database  ( Remove this, if you don't want to use additional database )
+global.Ad = require('origindb')('./config/Ad');
+
+// Make Console global for SGgame
+global.Console = require('./console.js');
+
+// Custom Globals End
 
 global.Dex = require('./sim/dex');
 global.toId = Dex.getId;
@@ -112,19 +139,18 @@ global.Users = require('./users');
 
 global.Punishments = require('./punishments');
 
-global.WL = require('./WL.js').WL;
 global.Chat = require('./chat');
+
 global.Rooms = require('./rooms');
+
+global.Ontime = {};
 
 global.Tells = require('./tells.js');
 
-delete process.send; // in case we're a child process
 global.Verifier = require('./verifier');
 Verifier.PM.spawn();
 
 global.Tournaments = require('./tournaments');
-
-global.Ontime = {};
 
 global.Dnsbl = require('./dnsbl');
 Dnsbl.loadDatacenters();
@@ -145,8 +171,8 @@ if (Config.crashguard) {
 
 global.Sockets = require('./sockets');
 
-exports.listen = function (port, bindAddress, workerCount) {
-	Sockets.listen(port, bindAddress, workerCount);
+exports.listen = function (port, bindaddress, workerCount) {
+	Sockets.listen(port, bindaddress, workerCount);
 };
 
 if (require.main === module) {
@@ -165,10 +191,6 @@ if (require.main === module) {
 global.TeamValidatorAsync = require('./team-validator-async');
 TeamValidatorAsync.PM.spawn();
 
-/*********************************************************
- * Start up the githubhook server
- ********************************************************/
-require('./github');
 /*********************************************************
  * Start up the REPL server
  *********************************************************/

@@ -12,6 +12,7 @@ const Data = require('./dex-data');
 const PRNG = require('./prng');
 const Side = require('./side');
 const Pokemon = require('./pokemon');
+const Server = require('./Server.js').Server;
 
 /**
  * An object representing a Pokemon that has fainted
@@ -37,6 +38,7 @@ const Pokemon = require('./pokemon');
  * @property {boolean | string} [rated] Rated string
  * @property {PlayerOptions} [p1] Player 1 data
  * @property {PlayerOptions} [p2] Player 2 data
+ * @property {boolean} [debug] show debug mode option
  */
 
 class Battle extends Dex.ModdedDex {
@@ -73,6 +75,7 @@ class Battle extends Dex.ModdedDex {
 		this.format = format.id;
 		this.formatid = options.formatid;
 		this.cachedFormat = format;
+		this.debugMode = format.debug || !!options.debug;
 		this.formatData = {id: format.id};
 
 		/** @type {Effect} */
@@ -121,7 +124,7 @@ class Battle extends Dex.ModdedDex {
 		this.activeTarget = null;
 		this.midTurn = false;
 		this.currentRequest = '';
-		this.lastMoveLine = 0;
+		this.lastMoveLine = -1;
 		this.reportPercentages = false;
 		this.supportCancel = false;
 		/** @type {?AnyObject} */
@@ -138,6 +141,10 @@ class Battle extends Dex.ModdedDex {
 		this.prng = options.prng || new PRNG(options.seed || undefined);
 		this.prngSeed = this.prng.startingSeed.slice();
 		this.teamGenerator = null;
+
+		// bound function for faster speedSort
+		// (so speedSort doesn't need to bind before use)
+		this.comparePriority = this.comparePriority.bind(this);
 
 		/** @type {{formatid: string, seed: [number, number, number, number], rated?: string | true}} */
 		const inputOptions = {formatid: options.formatid, seed: this.prng.seed};
@@ -458,37 +465,27 @@ class Battle extends Dex.ModdedDex {
 	}
 
 	/**
+	 * Truncate a number into an unsigned 32-bit integer, for
+	 * compatibility with the cartridge games' math systems.
+	 *
+	 * @param {number} num
+	 * @param {number} bits Truncate to `bits`-bit integer instead
+	 */
+	trunc(num, bits = 0) {
+		if (bits) return (num >>> 0) % (2 ** bits);
+		return num >>> 0;
+	}
+
+	/**
 	 * @param {AnyObject} a
 	 * @param {AnyObject} b
 	 */
 	comparePriority(a, b) {
-		a.priority = a.priority || 0;
-		a.subPriority = a.subPriority || 0;
-		a.speed = a.speed || 0;
-		b.priority = b.priority || 0;
-		b.subPriority = b.subPriority || 0;
-		b.speed = b.speed || 0;
-		if ((typeof a.order === 'number' || typeof b.order === 'number') && a.order !== b.order) {
-			if (typeof a.order !== 'number') {
-				return -1;
-			}
-			if (typeof b.order !== 'number') {
-				return 1;
-			}
-			if (b.order - a.order) {
-				return -(b.order - a.order);
-			}
-		}
-		if (b.priority - a.priority) {
-			return b.priority - a.priority;
-		}
-		if (b.speed - a.speed) {
-			return b.speed - a.speed;
-		}
-		if (b.subOrder - a.subOrder) {
-			return -(b.subOrder - a.subOrder);
-		}
-		return this.random() - 0.5;
+		return -((b.order || 4294967296) - (a.order || 4294967296)) ||
+			((b.priority || 0) - (a.priority || 0)) ||
+			((b.speed || 0) - (a.speed || 0)) ||
+			-((b.subOrder || 0) - (a.subOrder || 0)) ||
+			0;
 	}
 
 	/**
@@ -496,20 +493,43 @@ class Battle extends Dex.ModdedDex {
 	 * @param {AnyObject} b
 	 */
 	static compareRedirectOrder(a, b) {
-		a.priority = a.priority || 0;
-		a.speed = a.speed || 0;
-		b.priority = b.priority || 0;
-		b.speed = b.speed || 0;
-		if (b.priority - a.priority) {
-			return b.priority - a.priority;
+		return ((b.priority || 0) - (a.priority || 0)) ||
+			((b.speed || 0) - (a.speed || 0)) ||
+			-(b.thing.abilityOrder - a.thing.abilityOrder) ||
+			0;
+	}
+
+	/**
+	 * Sort a list, resolving speed ties the way the games do.
+	 *
+	 * @param {T[]} list
+	 * @param {(a: T, b: T) => number} comparator
+	 * @template T
+	 */
+	speedSort(list, comparator = this.comparePriority) {
+		if (list.length < 2) return;
+		let sorted = 0;
+		while (sorted + 1 < list.length) {
+			let nextIndexes = [sorted];
+			// grab list of next indexes
+			for (let i = sorted + 1; i < list.length; i++) {
+				let delta = comparator(list[nextIndexes[0]], list[i]);
+				if (delta < 0) continue;
+				if (delta > 0) nextIndexes = [i];
+				if (delta === 0) nextIndexes.push(i);
+			}
+			// put list of next indexes where they belong
+			let nextCount = nextIndexes.length;
+			for (let i = 0; i < nextCount; i++) {
+				let index = nextIndexes[i];
+				while (index > sorted + i) {
+					[list[index], list[index - 1]] = [list[index - 1], list[index]];
+					index--;
+				}
+			}
+			if (nextCount > 1) this.prng.shuffle(list, sorted, sorted + nextCount);
+			sorted += nextCount;
 		}
-		if (b.speed - a.speed) {
-			return b.speed - a.speed;
-		}
-		if (b.thing.abilityOrder - a.thing.abilityOrder) {
-			return -(b.thing.abilityOrder - a.thing.abilityOrder);
-		}
-		return 0;
 	}
 
 	/**
@@ -525,12 +545,9 @@ class Battle extends Dex.ModdedDex {
 				if (pokemon) actives.push(pokemon);
 			}
 		}
-		actives.sort((a, b) => {
-			if (b.speed - a.speed) {
-				return b.speed - a.speed;
-			}
-			return this.random() - 0.5;
-		});
+		this.speedSort(actives, (a, b) =>
+			b.speed - a.speed
+		);
 		for (const pokemon of actives) {
 			this.runEvent(eventid, pokemon, null, effect, relayVar);
 		}
@@ -546,7 +563,7 @@ class Battle extends Dex.ModdedDex {
 	 */
 	residualEvent(eventid, relayVar) {
 		let statuses = this.getRelevantEffectsInner(this, 'on' + eventid, null, null, false, true, 'duration');
-		statuses.sort((a, b) => this.comparePriority(a, b));
+		this.speedSort(statuses);
 		while (statuses.length) {
 			let statusObj = statuses[0];
 			statuses.shift();
@@ -767,7 +784,7 @@ class Battle extends Dex.ModdedDex {
 		if (fastExit) {
 			statuses.sort(Battle.compareRedirectOrder);
 		} else {
-			statuses.sort((a, b) => this.comparePriority(a, b));
+			this.speedSort(statuses);
 		}
 		let hasRelayVar = true;
 		effect = this.getEffect(effect);
@@ -1253,6 +1270,11 @@ class Battle extends Dex.ModdedDex {
 		if (this.p1.isChoiceDone() && this.p2.isChoiceDone()) {
 			throw new Error(`Choices are done immediately after a request`);
 		}
+		// SGgame
+		if ((this.p1.name === 'SG Server' || this.p2.name === 'SG Server') && (this.getFormat().isWildEncounter || this.getFormat().isTrainerBattle) && !this[(this.p1.name === 'SG Server' ? "p1" : "p2")].isChoiceDone()) {
+			Server.decideCOM(this, (this.p1.name === 'SG Server' ? "p1" : "p2"), (this.getFormat().isWildEncounter ? "random" : "trainer"));
+			this.checkActions();
+		}
 	}
 
 	tiebreak() {
@@ -1397,6 +1419,10 @@ class Battle extends Dex.ModdedDex {
 		if (sourceEffect) this.log[this.log.length - 1] += `|[from]${sourceEffect.fullname}`;
 		this.insertQueue({pokemon: pokemon, choice: 'runUnnerve'});
 		this.insertQueue({pokemon: pokemon, choice: 'runSwitch'});
+		// SGgame
+		let foe = this[(side.id === 'p1' ? 'p2' : 'p1')].pokemon[0];
+		if (side.battled[foe.slot].indexOf(pokemon.slot) < 0) side.battled[foe.slot].push(pokemon.slot);
+		if (foe.side.battled[pokemon.slot].indexOf(foe.slot) < 0) foe.side.battled[pokemon.slot].push(foe.slot);
 	}
 
 	/**
@@ -1765,6 +1791,16 @@ class Battle extends Dex.ModdedDex {
 		this.add('turn', this.turn);
 
 		this.makeRequest('move');
+		// SGgame
+		if (this.getFormat().isWildEncounter) {
+			let balls = ['pokeball', 'greatball', 'ultraball', 'masterball'];
+			let buttons = '';
+			for (let i = 0; i < balls.length; i++) {
+				buttons += '<button name="send" value="/throwpokeball ' + balls[i] + '" style="background:transparent;border:none;"><img src="http://www.serebii.net/itemdex/sprites/pgl/' + balls[i] + '.png" width="30" height="30"></button>&nbsp;&nbsp;';
+			}
+			this.add('raw', buttons);
+			this.add('');
+		 }
 	}
 
 	start() {
@@ -1834,7 +1870,7 @@ class Battle extends Dex.ModdedDex {
 		}
 		if (!target || !target.hp) return 0;
 		if (!target.isActive) return false;
-		if (this.gen > 5 && target === source && this.faintQueue.length === target.side.foe.pokemonLeft) return false;
+		if (this.gen > 5 && !target.side.foe.pokemonLeft) return false;
 		effect = this.getEffect(effect);
 		boost = this.runEvent('Boost', target, source, effect, Object.assign({}, boost));
 		let success = null;
@@ -2010,7 +2046,7 @@ class Battle extends Dex.ModdedDex {
 		}
 		effect = this.getEffect(effect);
 		if (damage && damage <= 1) damage = 1;
-		damage = Math.floor(damage);
+		damage = this.trunc(damage);
 		// for things like Liquid Ooze, the Heal event still happens when nothing is healed.
 		damage = this.runEvent('TryHeal', target, source, effect, damage);
 		if (!damage) return damage;
@@ -2052,15 +2088,15 @@ class Battle extends Dex.ModdedDex {
 	chain(previousMod, nextMod) {
 		// previousMod or nextMod can be either a number or an array [numerator, denominator]
 		if (Array.isArray(previousMod)) {
-			previousMod = Math.floor(previousMod[0] * 4096 / previousMod[1]);
+			previousMod = this.trunc(previousMod[0] * 4096 / previousMod[1]);
 		} else {
-			previousMod = Math.floor(previousMod * 4096);
+			previousMod = this.trunc(previousMod * 4096);
 		}
 
 		if (Array.isArray(nextMod)) {
-			nextMod = Math.floor(nextMod[0] * 4096 / nextMod[1]);
+			nextMod = this.trunc(nextMod[0] * 4096 / nextMod[1]);
 		} else {
-			nextMod = Math.floor(nextMod * 4096);
+			nextMod = this.trunc(nextMod * 4096);
 		}
 		return ((previousMod * nextMod + 2048) >> 12) / 4096; // M'' = ((M * M') + 0x800) >> 12
 	}
@@ -2070,7 +2106,7 @@ class Battle extends Dex.ModdedDex {
 	 * @param {number} [denominator]
 	 */
 	chainModify(numerator, denominator) {
-		let previousMod = Math.floor(this.event.modifier * 4096);
+		let previousMod = this.trunc(this.event.modifier * 4096);
 
 		if (Array.isArray(numerator)) {
 			denominator = numerator[1];
@@ -2080,7 +2116,7 @@ class Battle extends Dex.ModdedDex {
 		if (this.event.ceilModifier) {
 			nextMod = Math.ceil(numerator * 4096 / (denominator || 1));
 		} else {
-			nextMod = Math.floor(numerator * 4096 / (denominator || 1));
+			nextMod = this.trunc(numerator * 4096 / (denominator || 1));
 		}
 
 		this.event.modifier = ((previousMod * nextMod + 2048) >> 12) / 4096;
@@ -2100,8 +2136,9 @@ class Battle extends Dex.ModdedDex {
 			denominator = numerator[1];
 			numerator = numerator[0];
 		}
-		let modifier = Math.floor(numerator * 4096 / denominator);
-		return Math.floor((value * modifier + 2048 - 1) / 4096);
+		const tr = this.trunc;
+		let modifier = tr(numerator * 4096 / denominator);
+		return tr((tr(value * modifier) + 2048 - 1) / 4096);
 	}
 
 	/**
@@ -2248,8 +2285,10 @@ class Battle extends Dex.ModdedDex {
 		// @ts-ignore
 		defense = this.runEvent('Modify' + statTable[defenseStat], defender, attacker, move, defense);
 
+		const tr = this.trunc;
+
 		//int(int(int(2 * L / 5 + 2) * A * P / D) / 50);
-		let baseDamage = Math.floor(Math.floor(Math.floor(2 * level / 5 + 2) * basePower * attack / defense) / 50);
+		let baseDamage = tr(tr(tr(tr(2 * level / 5 + 2) * basePower * attack) / defense) / 50);
 
 		// Calculate damage modifiers separately (order differs between generations)
 		return this.modifyDamage(baseDamage, pokemon, target, move, suppressMessages);
@@ -2263,6 +2302,7 @@ class Battle extends Dex.ModdedDex {
 	 * @param {boolean} [suppressMessages]
 	 */
 	modifyDamage(baseDamage, pokemon, target, move, suppressMessages = false) {
+		const tr = this.trunc;
 		if (!move.type) move.type = '???';
 		let type = move.type;
 
@@ -2278,12 +2318,12 @@ class Battle extends Dex.ModdedDex {
 		// weather modifier
 		baseDamage = this.runEvent('WeatherModifyDamage', pokemon, target, move, baseDamage);
 
-		// crit
+		// crit - not a modifier
 		if (move.crit) {
-			baseDamage = this.modify(baseDamage, move.critModifier || (this.gen >= 6 ? 1.5 : 2));
+			baseDamage = tr(baseDamage * (move.critModifier || (this.gen >= 6 ? 1.5 : 2)));
 		}
 
-		// this is not a modifier
+		// random factor - also not a modifier
 		baseDamage = this.randomizer(baseDamage);
 
 		// STAB
@@ -2309,7 +2349,7 @@ class Battle extends Dex.ModdedDex {
 			if (!suppressMessages) this.add('-resisted', target);
 
 			for (let i = 0; i > move.typeMod; i--) {
-				baseDamage = Math.floor(baseDamage / 2);
+				baseDamage = tr(baseDamage / 2);
 			}
 		}
 
@@ -2321,10 +2361,8 @@ class Battle extends Dex.ModdedDex {
 			}
 		}
 
-		// Generation 5 sets damage to 1 before the final damage modifiers only
-		if (this.gen === 5 && !Math.floor(baseDamage)) {
-			baseDamage = 1;
-		}
+		// Generation 5, but nothing later, sets damage to 1 before the final damage modifiers
+		if (this.gen === 5 && !baseDamage) baseDamage = 1;
 
 		// Final modifier. Modifiers that modify damage after min damage check, such as Life Orb.
 		baseDamage = this.runEvent('ModifyDamage', pokemon, target, move, baseDamage);
@@ -2334,18 +2372,19 @@ class Battle extends Dex.ModdedDex {
 			this.add('-zbroken', target);
 		}
 
-		if (this.gen !== 5 && !Math.floor(baseDamage)) {
-			return 1;
-		}
+		// Generation 6-7 moves the check for minimum 1 damage after the final modifier...
+		if (this.gen !== 5 && !baseDamage) return 1;
 
-		return Math.floor(baseDamage);
+		// ...but 16-bit truncation happens even later, and can truncate to 0
+		return tr(baseDamage, 16);
 	}
 
 	/**
 	 * @param {number} baseDamage
 	 */
 	randomizer(baseDamage) {
-		return Math.floor(baseDamage * (100 - this.random(16)) / 100);
+		const tr = this.trunc;
+		return tr(tr(baseDamage * (100 - this.random(16))) / 100);
 	}
 
 	/**
@@ -2514,6 +2553,14 @@ class Battle extends Dex.ModdedDex {
 				faintData.target.isActive = false;
 				faintData.target.isStarted = false;
 				faintData.target.side.faintedThisTurn = true;
+				// SGgame
+				if (this.getFormat().useSGgame && !this.getFormat().noExp && ((faintData.source && faintData.source.side.name !== 'SG Server') || faintData.target.side.name === 'SG Server')) {
+					// Award Experience
+					// If the source of the KO is a falsey value, use the current foe for calculating EXP. This can happen with things such as sandstorm.
+					if (!faintData.source) faintData.source = this[faintData.target.side.foe.id].pokemon[0];
+					let out = Server.onFaint(faintData.source.side.name, this, faintData);
+					this.send('updateExp', out.substring(0, out.length - 1));
+				}
 			}
 		}
 
@@ -2569,6 +2616,8 @@ class Battle extends Dex.ModdedDex {
 			let priorities = {
 				'beforeTurn': 100,
 				'beforeTurnMove': 99,
+				'pokeball': 98,
+				'useItem': 97,
 				'switch': 7,
 				'runUnnerve': 7.3,
 				'runSwitch': 7.2,
@@ -2661,7 +2710,7 @@ class Battle extends Dex.ModdedDex {
 	}
 
 	sortQueue() {
-		this.queue.sort((a, b) => this.comparePriority(a, b));
+		this.speedSort(this.queue);
 	}
 
 	/**
@@ -2842,6 +2891,85 @@ class Battle extends Dex.ModdedDex {
 			// we return here because the update event would crash since there are no active pokemon yet
 			return;
 		}
+
+		// SGgame
+		case 'pokeball':
+			this.add('message', `${action.side.name} threw a ${(action.ball.charAt(0).toUpperCase() + action.ball.slice(1))}!`);
+			let result = Server.throwPokeball(action.ball, action.target);
+			let count = result;
+			if (count === true) count = 3;
+			let msgs = ['Oh no! The pokemon broke free', 'Aww! It appeared to be caught!', 'Aargh! Almost had it!', 'Gah! It was so close too!', 'Gotcha! ' + (action.target.name || action.target.species) + ' was caught!'];
+			for (count; count > 0; count--) {
+				this.add('message', '...');
+			}
+			this.send('takeitem', toId(action.side.name) + '|' + action.ball + '|' + action.side.active[0].slot);
+			if (result === true) {
+				this.add('message', msgs[msgs.length - 1]);
+				// Giving the newly caught pokemon handled in the main process.
+				this.send('caught', toId(action.side.name) + '|' + action.ball);
+				if (this.getFormat().useSGgame && !this.getFormat().noExp && action.side.name !== 'SG Server') {
+					// Award Experience
+					let out = Server.onFaint(toId(action.side.name), this, {source: action.side.active[0], target: action.target});
+					this.send('updateExp', out.substring(0, out.length - 1));
+				}
+				this.win(action.side);
+				return true;
+			} else {
+				this.add('message', msgs[result]);
+				this.add('');
+			}
+			break;
+		case 'useItem':
+			let hadEffect = false;
+			if (action.item.use.healHP) {
+				let heal = 0;
+				if (typeof action.item.use.healHP === 'string') {
+					heal = action.target.maxhp * (Number(action.item.use.healHP.substring(0, action.item.use.healHP.length - 1)) * 0.01);
+				} else if (action.item.use.healHP === true) {
+					heal = action.target.maxhp - action.target.hp;
+				} else {
+					heal = action.item.use.healHP;
+				}
+				if (action.target.hp + heal > action.target.maxhp) heal = action.target.maxhp - action.target.hp;
+				if (heal > 0) {
+					this.heal(heal, action.target, null, {fullname: action.item.name});
+					hadEffect = true;
+				}
+			}
+			if (action.item.use.healStatus) {
+				if (action.target.status || action.target.volatiles['confusion']) {
+					if (action.item.use.healStatus === true) {
+						action.target.cureStatus();
+						action.target.removeVolatile('confusion');
+						hadEffect = true;
+					} else {
+						let canHeal = action.item.use.healStatus.split('|');
+						if (canHeal.indexOf(action.target.status) > -1) {
+							action.target.cureStatus();
+							hadEffect = true;
+						}
+						if (canHeal.indexOf('confusion') > -1 && ('confusion' in action.target.volatiles)) {
+							action.target.removeVolatile('confusion');
+							hadEffect = true;
+						}
+					}
+				}
+			}
+			if (action.item.use.healPP) {
+				let move = action.target.moveset[action.move];
+				if (move.pp < move.maxpp) {
+					move.pp += action.item.use.healPP;
+					if (move.pp > move.maxpp) move.pp = move.maxpp;
+					hadEffect = true;
+					this.add('', (action.target.name || action.target.species) + "'s " + move.id + " had its PP restored by " + action.item.use.healPP + "!");
+				}
+			}
+			if (hadEffect) {
+				this.add('message', action.side.name + " used a " + action.item.name + "!");
+				this.send('takeitem', toId(action.side.name) + "|" + action.item.id + "|" + action.target.slot);
+				this.add('');
+			}
+			break;
 
 		case 'pass':
 			return;
@@ -3212,7 +3340,14 @@ class Battle extends Dex.ModdedDex {
 	 * @param {(string | number | Function | AnyObject)[]} args
 	 */
 	attrLastMove(...args) {
-		if (args.includes('[still]')) {
+		if (this.lastMoveLine < 0) return;
+		if (this.log[this.lastMoveLine].startsWith('|-anim|')) {
+			if (args.includes('[still]')) {
+				this.log.splice(this.lastMoveLine, 1);
+				this.lastMoveLine = -1;
+				return;
+			}
+		} else if (args.includes('[still]')) {
 			// If no animation plays, the target should never be known
 			let parts = this.log[this.lastMoveLine].split('|');
 			parts[4] = '';
@@ -3225,6 +3360,7 @@ class Battle extends Dex.ModdedDex {
 	 * @param {Pokemon} newTarget
 	 */
 	retargetLastMove(newTarget) {
+		if (this.lastMoveLine < 0) return;
 		let parts = this.log[this.lastMoveLine].split('|');
 		parts[4] = newTarget.toString();
 		this.log[this.lastMoveLine] = parts.join('|');
@@ -3234,7 +3370,7 @@ class Battle extends Dex.ModdedDex {
 	 * @param {string} activity
 	 */
 	debug(activity) {
-		if (this.getFormat().debug) {
+		if (this.debugMode) {
 			this.add('debug', activity);
 		}
 	}

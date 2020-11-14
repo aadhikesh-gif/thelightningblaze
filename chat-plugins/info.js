@@ -46,10 +46,8 @@ const commands = {
 		if (Config.groups[targetUser.group] && Config.groups[targetUser.group].name) {
 			buf += `<br />Global ${Config.groups[targetUser.group].name} (${targetUser.group})`;
 		}
-		if (targetUser.isSysop === true) {
+		if (targetUser.isSysop) {
 			buf += `<br />(Pok&eacute;mon Showdown System Operator)`;
-		} else if (targetUser.isSysop === 'WL' && targetUser.hasSysopAccess()) {
-			buf += `<br />(Wavelength System Operator)`;
 		}
 		if (!targetUser.registered) {
 			buf += `<br />(Unregistered)`;
@@ -81,8 +79,12 @@ const commands = {
 		if (!showAll) {
 			return this.sendReplyBox(buf);
 		}
+		const canViewAlts = (user === targetUser || user.can('alts', targetUser));
+		const canViewPunishments = canViewAlts || (room.isPrivate !== true && user.can('mute', targetUser, room) && targetUser.userid in room.users);
+		const canViewSecretRooms = user === targetUser || (canViewAlts && targetUser.locked) || user.can('makeroom');
 		buf += '<br />';
-		if (user.can('alts', targetUser) || user.can('alts') && user === targetUser) {
+
+		if (canViewAlts) {
 			let prevNames = Object.keys(targetUser.prevNames).map(userid => {
 				const punishment = Punishments.userids.get(userid);
 				return userid + (punishment ? ` (${Punishments.punishmentTypes.get(punishment[0]) || 'punished'}${punishment[1] !== targetUser.userid ? ` as ${punishment[1]}` : ''})` : '');
@@ -103,6 +105,8 @@ const commands = {
 				}).join(", ");
 				if (prevNames) buf += `<br />Previous names: ${prevNames}`;
 			}
+		}
+		if (canViewPunishments) {
 			if (targetUser.namelocked) {
 				buf += `<br />NAMELOCKED: ${targetUser.namelocked}`;
 				let punishment = Punishments.userids.get(targetUser.locked);
@@ -174,15 +178,32 @@ const commands = {
 				buf += Chat.html`<br />Host: ${targetUser.latestHost}`;
 			}
 		}
-		if ((user === targetUser || user.can('alts', targetUser)) && hiddenrooms) {
+		if (canViewAlts && hiddenrooms) {
 			buf += `<br />Hidden rooms: ${hiddenrooms}`;
 		}
-		const staffViewingLocked = user.can('alts', targetUser) && targetUser.locked;
-		if ((user === targetUser || user.can('makeroom') || staffViewingLocked) && privaterooms) {
-			buf += `<br />Private rooms: ${privaterooms}`;
+		if (canViewSecretRooms && privaterooms) {
+			buf += `<br />Secret rooms: ${privaterooms}`;
 		}
 
-		if (user.can('alts', targetUser) || (room.isPrivate !== true && user.can('mute', targetUser, room) && targetUser.userid in room.users)) {
+		let gameRooms = [];
+		for (const room of Rooms.rooms.values()) {
+			if (!room.game) continue;
+			if ((targetUser.userid in room.game.players && !targetUser.inRooms.has(room.id)) ||
+				room.auth[targetUser.userid] === Users.PLAYER_SYMBOL) {
+				if (room.isPrivate && !canViewAlts) {
+					continue;
+				}
+				gameRooms.push(room.id);
+			}
+		}
+		if (gameRooms.length) {
+			buf += '<br />Recent games: ' + gameRooms.map(id => {
+				let shortId = id.startsWith('battle-') ? id.slice(7) : id;
+				return Chat.html`<a href="/${id}">${shortId}</a>`;
+			}).join(' | ');
+		}
+
+		if (canViewPunishments) {
 			let punishments = Punishments.getRoomPunishments(targetUser, {checkIps: true});
 
 			if (punishments.length) {
@@ -1256,6 +1277,7 @@ const commands = {
 
 	'!uptime': true,
 	uptime: function (target, room, user) {
+		if (!this.can('broadcast')) return false;
 		if (!this.runBroadcast()) return;
 		let uptime = process.uptime();
 		let uptimeText;

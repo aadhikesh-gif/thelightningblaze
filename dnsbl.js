@@ -25,7 +25,7 @@ let Dnsbl = module.exports;
 
 /** @type {Map<string, string?>} */
 let dnsblCache = Dnsbl.cache = new Map();
-dnsblCache.set('49.37.178.118', null);
+dnsblCache.set('127.0.0.1', null);
 
 /**
  * @param {string} ip
@@ -344,7 +344,7 @@ Dnsbl.reverse = function reverseDns(ip) {
 			resolve('anchorfree.proxy-nohost');
 			return;
 		}
-		if (ip === '49.37.178.118') {
+		if (ip === '127.0.0.1') {
 			resolve('localhost');
 			return;
 		}

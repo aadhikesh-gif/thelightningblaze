@@ -28,7 +28,7 @@ class Poll {
 			timeout: null,
 			timeoutMins: 0,
 			startTime: Date.now(),
-			startedUser: WL.nameColor(name, true, true),
+			startedUser: Server.nameColor(name, true, true),
 			options: new Map(),
 		}];
 		for (let i = 0; i < options.length; i++) {
@@ -233,6 +233,9 @@ class Poll {
 
 exports.Poll = Poll;
 
+/** @typedef {(this: CommandContext, target: string, room: ChatRoom, user: User, connection: Connection, cmd: string, message: string) => (void)} ChatHandler */
+/** @typedef {{[k: string]: ChatHandler | string | true | string[] | ChatCommands}} ChatCommands */
+
 /** @type {ChatCommands} */
 const commands = {
 	poll: {
@@ -251,17 +254,17 @@ const commands = {
 			const supportHTML = cmd === 'htmlcreate';
 			if (room.poll && room.poll.pollArray.length >= 5) return this.errorReply('There can only be up to 5 polls at a time.');
 			let separator = '';
-			if (text.includes('\n')) {
+			if (target.includes('\n')) {
 				separator = '\n';
-			} else if (text.includes('|')) {
+			} else if (target.includes('|')) {
 				separator = '|';
-			} else if (text.includes(',')) {
+			} else if (target.includes(',')) {
 				separator = ',';
 			} else {
 				return this.errorReply("Not enough arguments for /poll new.");
 			}
 
-			let params = text.split(separator).map(param => param.trim());
+			let params = target.split(separator).map(param => param.trim());
 
 			if (!this.can('minigame', null, room)) return false;
 			if (supportHTML && !this.can('declare', null, room)) return false;
@@ -290,7 +293,7 @@ const commands = {
 					timeout: null,
 					timeoutMins: 0,
 					startTime: Date.now(),
-					startedUser: WL.nameColor(user.name, true, true),
+					startedUser: Server.nameColor(user.name, true, true),
 					options: new Map(),
 				});
 				for (let i = 0; i < options.length; i++) {
