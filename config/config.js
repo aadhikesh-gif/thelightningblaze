@@ -8,13 +8,13 @@ exports.port = 8080;
 /**
  * The server Namr - Being used to rename custom-plugins.
  */
-exports.serverName = 'Impulse';
+exports.serverName = 'Rage';
 
 /**
 * The server IP - Being used to show avatars in profile.
 */
-exports.serverIp = 'impulse07.glitch.com';
-exports.serverid = 'impulse';
+exports.serverIp = 'http://amber-abalone-redcurrant.glitch.me-80.psim.us/';
+exports.serverid = 'rage';
 exports.servertoken = 'teNnR0/Trux7';
 /**
  * The server address - the address at which Pokemon Showdown should be hosting
@@ -129,7 +129,7 @@ exports.poof = true;
 exports.expTimer = 30000;
 
 // add system operators.
-exports.special = ['princesky', 'shivay', 'alliancesky'];
+exports.special = ['aadhikesh', 'arceusisnub'];
 
 /**
  * crash guard - write errors to log file instead of crashing
