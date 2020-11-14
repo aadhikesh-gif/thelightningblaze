@@ -6,6 +6,8 @@
  */
 'use strict';
 
+const Server = require('./Server.js').Server;
+
 /**
  * An object representing a Pokemon's move
  *
@@ -26,11 +28,13 @@ class Pokemon {
 	 * @param {string | AnyObject} set
 	 * @param {Side} side
 	 */
-	constructor(set, side) {
+	constructor(set, side, slot) {
 		/**@type {Side} */
 		this.side = side;
 		/**@type {Battle} */
 		this.battle = side.battle;
+
+		this.slot = slot;
 
 		let pokemonScripts = this.battle.data.Scripts.pokemon;
 		if (pokemonScripts) Object.assign(this, pokemonScripts);
@@ -181,6 +185,10 @@ class Pokemon {
 		if (this.gender === 'N') this.gender = '';
 		this.happiness = typeof set.happiness === 'number' ? this.battle.clampIntRange(set.happiness, 0, 255) : 255;
 		this.pokeball = this.set.pokeball || 'pokeball';
+		// SGgame
+		if (this.battle.getFormat().useSGgame) this.exp = this.set.exp || Server.calcExp(this.speciesid, this.level);
+		this.slot = (!slot && slot !== 0 ? this.side.pokemon.length - 1 : slot);
+
 
 		this.fullname = this.side.id + ': ' + this.name;
 		this.details = this.species + (this.level === 100 ? '' : ', L' + this.level) + (this.gender === '' ? '' : ', ' + this.gender) + (this.set.shiny ? ', shiny' : '');
@@ -450,16 +458,16 @@ class Pokemon {
 			// @ts-ignore
 			stat = this.battle.getStatCallback(stat, statName, this, unboosted);
 		}
+		if (statName === 'spe' && stat > 10000) stat = 10000;
 		return stat;
 	}
 
 	getActionSpeed() {
 		let speed = this.getStat('spe', false, false);
-		if (speed > 10000) speed = 10000;
 		if (this.battle.getPseudoWeather('trickroom')) {
 			speed = 0x2710 - speed;
 		}
-		return speed & 0x1FFF;
+		return this.battle.trunc(speed, 13);
 	}
 
 	/**
@@ -1119,7 +1127,7 @@ class Pokemon {
 	damage(d, source = null, effect = null) {
 		if (!this.hp || isNaN(d) || d <= 0) return 0;
 		if (d < 1 && d > 0) d = 1;
-		d = Math.floor(d);
+		d = this.battle.trunc(d);
 		this.hp -= d;
 		if (this.hp <= 0) {
 			d += this.hp;
@@ -1182,7 +1190,7 @@ class Pokemon {
 	 */
 	heal(d, source = null, effect = null) {
 		if (!this.hp) return false;
-		d = Math.floor(d);
+		d = this.battle.trunc(d);
 		if (isNaN(d)) return false;
 		if (d <= 0) return false;
 		if (this.hp >= this.maxhp) return false;
@@ -1200,7 +1208,7 @@ class Pokemon {
 	 */
 	sethp(d) {
 		if (!this.hp) return 0;
-		d = Math.floor(d);
+		d = this.battle.trunc(d);
 		if (isNaN(d)) return;
 		if (d < 1) d = 1;
 		d = d - this.hp;
@@ -1327,7 +1335,8 @@ class Pokemon {
 
 			this.battle.singleEvent('Eat', item, this.itemData, this, source, sourceEffect);
 			this.battle.runEvent('EatItem', this, null, null, item);
-
+			// SGgame
+			if (this.battle.getFormat().takeItems) this.battle.send('takeitem', toId(this.side.name) + "|" + toId(this.item) + "|" + this.slot + "|1");
 			this.lastItem = this.item;
 			this.item = '';
 			this.itemData = {id: '', target: this};
@@ -1363,6 +1372,8 @@ class Pokemon {
 			}
 
 			this.battle.singleEvent('Use', item, this.itemData, this, source, sourceEffect);
+			// SGgame
+			if (this.battle.getFormat().takeItems) this.battle.send('takeitem', toId(this.side.name) + "|" + toId(this.item) + "|" + this.slot + "|1");
 
 			this.lastItem = this.item;
 			this.item = '';

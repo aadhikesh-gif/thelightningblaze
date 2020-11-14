@@ -31,7 +31,7 @@ describe.skip('Sockets', function () {
 		});
 
 		it('should be able to spawn workers on listen', function () {
-			Sockets.listen(0, '49.37.178.118', 1);
+			Sockets.listen(0, '127.0.0.1', 1);
 			assert.strictEqual(Sockets.workers.size, 1);
 		});
 
@@ -59,7 +59,7 @@ describe.skip('Sockets', function () {
 			msg = msg || `$
 				const {Session} = require('sockjs/lib/transport');
 				const socket = new Session('aaaaaaaa', server);
-				socket.remoteAddress = '49.37.178.118';
+				socket.remoteAddress = '127.0.0.1';
 				if (!('headers' in socket)) socket.headers = {};
 				socket.headers['x-forwarded-for'] = '';
 				socket.protocol = 'websocket';

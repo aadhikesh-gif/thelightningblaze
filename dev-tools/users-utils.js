@@ -150,7 +150,7 @@ function createConnection(ip, workerid, socketid) {
 	worker.addSocket(socketid);
 
 	let connectionid = `${workerid}-${socketid}`;
-	let connection = new Users.Connection(connectionid, worker, socketid, null, ip || '49.37.178.118');
+	let connection = new Users.Connection(connectionid, worker, socketid, null, ip || '127.0.0.1');
 	Users.connections.set(connectionid, connection);
 
 	return connection;

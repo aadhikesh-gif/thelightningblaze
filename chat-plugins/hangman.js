@@ -9,7 +9,7 @@ const maxMistakes = 6;
 
 class Hangman extends Rooms.RoomGame {
 	/**
-	 * @param {ChatRoom | GameRoom} room
+	 * @param {ChatRoom} room
 	 * @param {User} user
 	 * @param {string} word
 	 * @param {string?} [hint]
@@ -171,7 +171,7 @@ class Hangman extends Rooms.RoomGame {
 			}
 			if (result === 2) {
 				output += Chat.html`<br />Winner: ${this.lastGuesser}`;
-				WL.ExpControl.addExp(this.lastGuesser, this.room, 5);
+				Server.ExpControl.addExp(this.lastGuesser, this.room, 5);
 			} else if (this.guesses[this.guesses.length - 1].length === 1) {
 				// last guess was a letter
 				output += Chat.html` <small>&ndash; ${this.lastGuesser}</small>`;
@@ -218,12 +218,18 @@ class Hangman extends Rooms.RoomGame {
 	}
 }
 
+/** @typedef {(this: CommandContext, target: string, room: ChatRoom, user: User, connection: Connection, cmd: string, message: string) => (void)} ChatHandler */
+/** @typedef {{[k: string]: ChatHandler | string | true | string[] | ChatCommands}} ChatCommands */
+
 /** @type {ChatCommands} */
 const commands = {
 	hangman: {
 		create: 'new',
-		new: function (target, room, user) {
-			let params = target.split(',');
+		new: function (target, room, user, connection) {
+			/** @type {string} */
+			let text = Chat.filter.call(this, target, user, room, connection);
+			if (target !== text) return this.errorReply("You are not allowed to use filtered words in hangmans.");
+			let params = text.split(',');
 
 			if (!this.can('minigame', null, room)) return false;
 			// @ts-ignore

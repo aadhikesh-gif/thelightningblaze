@@ -279,7 +279,7 @@ if (cluster.isMaster) {
 	if (Config.crashguard) {
 		// graceful crash
 		process.on('uncaughtException', err => {
-			require('./lib/crashlogger')(err, `Socket process ${cluster.worker.id} (${process.pid})`, true);
+			require('./lib/crashlogger')(err, `Socket process ${cluster.worker.id} (${process.pid})`);
 		});
 	}
 
@@ -294,7 +294,7 @@ if (cluster.isMaster) {
 			try {
 				key = fs.readFileSync(key);
 			} catch (e) {
-				require('./lib/crashlogger')(new Error(`Failed to read the configured SSL private key PEM file:\n${e.stack}`), `Socket process ${cluster.worker.id} (${process.pid})`, true);
+				require('./lib/crashlogger')(new Error(`Failed to read the configured SSL private key PEM file:\n${e.stack}`), `Socket process ${cluster.worker.id} (${process.pid})`);
 			}
 		} catch (e) {
 			console.warn('SSL private key config values will not support HTTPS server option values in the future. Please set it to use the absolute path of its PEM file.');
@@ -308,7 +308,7 @@ if (cluster.isMaster) {
 			try {
 				cert = fs.readFileSync(cert);
 			} catch (e) {
-				require('./lib/crashlogger')(new Error(`Failed to read the configured SSL certificate PEM file:\n${e.stack}`), `Socket process ${cluster.worker.id} (${process.pid})`, true);
+				require('./lib/crashlogger')(new Error(`Failed to read the configured SSL certificate PEM file:\n${e.stack}`), `Socket process ${cluster.worker.id} (${process.pid})`);
 			}
 		} catch (e) {
 			console.warn('SSL certificate config values will not support HTTPS server option values in the future. Please set it to use the absolute path of its PEM file.');
@@ -320,7 +320,7 @@ if (cluster.isMaster) {
 				// In case there are additional SSL config settings besides the key and cert...
 				appssl = require('https').createServer(Object.assign({}, Config.ssl.options, {key, cert}));
 			} catch (e) {
-				require('./lib/crashlogger')(`The SSL settings are misconfigured:\n${e.stack}`, `Socket process ${cluster.worker.id} (${process.pid})`, true);
+				require('./lib/crashlogger')(`The SSL settings are misconfigured:\n${e.stack}`, `Socket process ${cluster.worker.id} (${process.pid})`);
 			}
 		}
 	}
@@ -611,9 +611,11 @@ if (cluster.isMaster) {
 		}
 
 		let socketid = '' + (++socketCounter);
-		sockets.set(socketid, socket);
+		sockets.set(socketid, socket);/*
 
-		let socketip = socket.remoteAddress;
+		let socketip = socket.remoteAddress;*/
+		// Ip conflict fix
+		let socketip = socket.remoteAddress === '127.0.0.1' ? socket.headers["x-forwarded-for"].split(",")[0] : socket.remoteAddress;
 		if (isTrustedProxyIp(socketip)) {
 			let ips = (socket.headers['x-forwarded-for'] || '')
 				.split(',')

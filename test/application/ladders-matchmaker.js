@@ -25,7 +25,7 @@ describe('Matchmaker', function () {
 	});
 
 	beforeEach(function () {
-		this.p1 = new User(new Connection('49.37.178.118'));
+		this.p1 = new User(new Connection('127.0.0.1'));
 		this.p1.forceRename('Morfent', true);
 		this.p1.connected = true;
 		this.p1.team = 'Gengar||||lick||252,252,4,,,|||||';
